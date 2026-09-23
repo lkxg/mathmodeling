@@ -1,0 +1,5 @@
+.venv-q1/
+outputs/
+/E题/
+__pycache__/
+*.pyc

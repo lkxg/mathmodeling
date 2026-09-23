@@ -1,0 +1,40 @@
+# Paths are relative to root_dir; root_dir is relative to this YAML file.
+root_dir: ..
+video_root: E题/E题数据/附件1-数据集原始多模态样本/MOSEI数据集部分原始视频-100条
+labels: E题/E题数据/附件1-数据集原始多模态样本/MOSEI数据集部分原始视频-100条/label-100.xlsx
+output_dir: outputs/q1
+expected_samples: 100
+device: cuda:0
+seed: 2026
+models:
+  align:
+    id: Qwen/Qwen3-ForcedAligner-0.6B-hf
+    revision: c07281df297b9905d24a508279258cccf987a064
+    dtype: float16
+    attention: eager
+  text:
+    id: answerdotai/ModernBERT-base
+    revision: 8949b909ec900327062f0ebf497f51aef5e6f0c8
+    dtype: float32
+    attention: eager
+  emotion:
+    id: emotion2vec/emotion2vec_base
+    revision: 0c9a3152734f9d7a7a05b4ee6bfb3c109d288664
+  face:
+    id: nutPace/openface_weights
+    revision: 3844412b54706ed0a930b99589508ed3c101f39e
+media:
+  sample_rate: 16000
+  # Peak amplitude at or below this (≈ -80 dBFS) marks the whole clip as digital silence.
+  silence_peak: 1.0e-4
+vision:
+  sample_fps: 10.0
+  max_side: 960
+  face_threshold: 0.8
+  track_iou_threshold: 0.2
+aggregation:
+  retain_gaps: true
+  min_gap_seconds: 0.08
+  export_dtype: float16
+  # Samples whose time-valid word ratio falls below this are flagged for manual review.
+  alignment_suspect_ratio: 0.6
