@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Q1 时间边界复核</title>
+<style>
+body{font:16px/1.6 system-ui,sans-serif;max-width:1250px;margin:auto;padding:24px;color:#18313b;background:#f5f7f8}h1{font-size:25px}button,input,select{font:inherit;padding:6px}button{cursor:pointer}section{background:white;border:1px solid #dde3e6;border-radius:8px;padding:16px;margin:16px 0}.bar{display:flex;gap:12px;flex-wrap:wrap;align-items:center}.frames{display:flex;gap:12px}.frames figure{margin:0;flex:1}.frames img{width:100%}video{max-width:400px;max-height:230px}audio{width:100%}.plot{width:100%}table{border-collapse:collapse;width:100%;font-size:14px}td,th{border-bottom:1px solid #dde3e6;padding:7px;text-align:left}td input{width:85px}td input.comment{width:160px}.warn{color:#a44425}.muted{color:#596b76}.scroll{overflow:auto}code{word-break:break-all}tr.active{background:#e7f4f1}#notice{min-height:26px;color:#176150}
+</style>
+<h1>第一问：18 条样本的时间边界复核</h1>
+<p>自动检查已完成；人工词边界尚未标注。VAD 和自动对齐仅作为参考。请按实际听到的词填写边界，无法辨认时留空并说明原因。</p>
+<div class="bar"><label>样本 <select id="sample"></select></label><label>匿名复核者代号 <input id="reviewer" placeholder="例如 R1" size="10"></label><button id="export">导出全部人工标注 CSV</button></div>
+<p id="notice" aria-live="polite"></p>
+<section><h2 id="title"></h2><p id="transcript"></p><p id="status" class="warn"></p><p id="metrics" class="muted"></p>
+<audio id="audio" controls preload="metadata"></audio><p>共同时间轴：<strong id="clock">0.000</strong> 秒。点击词可试听；“取起点/终点”读取音频当前位置加音轨偏移。人工输入不会由自动边界预填。</p>
+<details><summary>原始视频（辅助查看）</summary><video id="video" controls preload="none"></video><p class="muted">浏览器可能重置视频媒体时钟。标注使用上方音频时钟；下方原帧时间来自解码 PTS。</p></details>
+<p id="visual-note"></p><p class="muted">画面复核由 AI 辅助完成，只覆盖列出的抽查帧；不等于逐帧认证或人工词边界真值。</p>
+<img id="plot" class="plot" alt="波形、语音活动概率与自动词区间"><div id="frames" class="frames"></div></section>
+<section><div class="scroll"><table><thead><tr><th>索引 / 词</th><th>自动区间 (s)</th><th>自动标记</th><th>人工起点</th><th>人工终点</th><th>备注</th></tr></thead><tbody id="words"></tbody></table></div></section>
+<p class="muted">修改自动保存在当前浏览器；请导出 CSV 留存。关闭页面前确认已导出。数字静音样本保留原转写，不凭文字推测实际语音边界。</p>
+<script id="cases-data" type="application/json">__CASES_JSON__</script>
+<script>
+'use strict';
+const cases=JSON.parse(document.getElementById('cases-data').textContent);
+const el=id=>document.getElementById(id), key='q1-time-review-v1';
+let saved={};try{saved=JSON.parse(localStorage.getItem(key)||'{}')}catch(e){}
+let current=cases[0]; el('reviewer').value=saved.reviewer||'';
+const rowKey=w=>JSON.stringify([w.sample_id,w.word_index]);
+const notice=t=>el('notice').textContent=t;
+function persist(){saved.reviewer=el('reviewer').value.trim();try{localStorage.setItem(key,JSON.stringify(saved));notice('已在当前浏览器保存。')}catch(e){notice('浏览器无法保存，请及时导出 CSV。')}}
+el('reviewer').onchange=persist;
+for(let i=0;i<cases.length;i++){const option=document.createElement('option');option.value=i;option.textContent=cases[i].sample_id;el('sample').append(option)}
+function td(row,text){const c=document.createElement('td');c.textContent=text??'';row.append(c);return c}
+function show(i){current=cases[i];el('title').textContent=current.sample_id;el('transcript').textContent=current.transcript;el('status').textContent='待复核原因：'+current.review_reasons;el('metrics').textContent=`时长 ${current.duration.toFixed(3)} s；音频峰值 ${current.audio_peak}；VAD 覆盖率 ${current.vad_recall??'不可评分'}；自动分类 ${current.automatic_category}`;el('audio').src=current.audio;el('video').src=current.video;el('plot').src=current.plot;el('clock').textContent=current.audio_offset.toFixed(3);el('frames').replaceChildren();
+for(const f of current.frames){const fig=document.createElement('figure'),im=document.createElement('img'),caption=document.createElement('figcaption');im.src=f.image;im.alt=`原帧 ${f.frame_index}`;caption.textContent=`原帧 ${f.frame_index} · ${f.pts.toFixed(3)} s`;fig.append(im,caption);el('frames').append(fig)}
+el('words').replaceChildren();for(const w of current.words){const tr=document.createElement('tr'),item=saved[rowKey(w)]||{};el('words').append(tr);const cell=td(tr,''),seek=document.createElement('button');seek.textContent=`${w.word_index} · ${w.word}`;seek.onclick=()=>{el('audio').currentTime=Math.max(0,w.auto_start-current.audio_offset-.15);el('audio').play().catch(()=>{});for(const r of el('words').rows)r.classList.remove('active');tr.classList.add('active')};cell.append(seek);td(tr,`${w.auto_start.toFixed(3)}–${w.auto_end.toFixed(3)}${w.auto_valid?'':' [无效]'}`);td(tr,w.flags);
+for(const field of ['manual_start','manual_end','comment']){const c=td(tr,''),input=document.createElement('input');input.value=item[field]??'';input.setAttribute('aria-label',`${w.word} ${field}`);if(field!=='comment'){input.type='number';input.min=0;input.max=current.duration;input.step='.001'}else input.className='comment';
+const save=()=>{const val=input.value;saved[rowKey(w)]={...(saved[rowKey(w)]||{}),[field]:val,reviewer_code:el('reviewer').value.trim()};persist()};input.onchange=save;c.append(input);if(field!=='comment'){const button=document.createElement('button');button.textContent=field==='manual_start'?'取起点':'取终点';button.onclick=()=>{input.value=(el('audio').currentTime+current.audio_offset).toFixed(3);save()};c.append(button)}}}}
+const render=show;show=function(i){render(i);el('visual-note').textContent='画面复核：'+(current.visual_note||'未复核')+'；复核排除帧数：'+(current.review_excluded_frames||0)};
+el('sample').onchange=e=>show(Number(e.target.value));el('audio').ontimeupdate=()=>el('clock').textContent=(el('audio').currentTime+current.audio_offset).toFixed(3);
+el('export').onclick=()=>{const fields=['sample_id','word_index','word','auto_start','auto_end','auto_valid','flags','vad_speech_fraction','manual_start','manual_end','reviewer_code','comment'];const rows=cases.flatMap(c=>c.words.map(w=>({...w,...(saved[rowKey(w)]||{})})));for(const r of rows){if((r.manual_start!==''||r.manual_end!=='')&&!r.reviewer_code){notice('存在未填写复核者代号的标注，请补充后再次导出。');return}}
+const quote=v=>'"'+String(v??'').replaceAll('"','""')+'"';const csv='\ufeff'+[fields,...rows.map(r=>fields.map(f=>r[f]))].map(r=>r.map(quote).join(',')).join('\r\n');const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='q1_word_annotations.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);notice('已导出。填写完整边界并运行评分脚本后，才能计算人工边界误差。')};show(0);
+</script></html>

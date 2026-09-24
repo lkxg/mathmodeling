@@ -36,7 +36,7 @@ bash q1/install.sh
 .venv-q1/bin/python -m unittest discover -s q1/tests -v
 ```
 
-当前验证范围：13项自动测试以及全部100条真实视频的全模型流程（结构验证）。结构性时间检查不等于人工核验后的对齐精度。
+当前验证范围：35项自动测试（13项主流程、8项探针协议、14项时间映射/软对齐/人工评分测试），以及全部100条真实视频的全模型流程。新增时间深度核验、500份替代锚定视图重建及75个实验模型预测重放。结构性时间检查不等于人工核验后的对齐精度。
 
 `install.sh` 继承已有基础环境，所有新增包安装在 `.venv-q1` 中。另一台机器应先在合适的Python环境中安装根目录 `requirements-ml.txt` 的基础依赖及系统 `ffmpeg`。已验证Python 3.12、PyTorch 2.13.0+cu126、torchvision 0.28.0+cu126、V100 32GB；详细环境记录见 `environment-tested.txt`。
 
@@ -155,6 +155,22 @@ batch = collate([sample])
 `summary.csv`的模态有效比例以全部序列位置为分母，包含无文本的额外区间；不要把它直接解读为词识别准确率。对齐有效比例也只是结构检查通过率。真正的时间精度需要在部分原始视频上人工标记词边界后计算，程序没有伪造这个评估结果。
 
 `features/`是全部100条自主生成、经过定义的词级特征及映射。`cache/`包含工作用波形和高频特征，会明显更大。提交前应按题目要求选择必要文件、压缩并检查总大小；50MB还要留给问题2/3核心材料。不要直接打包虚拟环境、公共预训练权重或原视频。公共权重能否仅提供下载与校验信息，应以竞赛正式提交规定为准。
+
+## 补充实验
+
+新增的VAD一致性检查与特征消融说明见 [analysis/README.md](analysis/README.md)。修正版探针直接使用导出的完整768/818/56维特征，增加音频768→793→818、视觉28→56及融合标准差消融，采用嵌套视频分组验证，同时报告回归与完整三分类指标。
+
+时间身份核验、采样率扰动、锚点对照、局部软对齐与18条样本的复核页面见 [analysis/time_study/README.md](analysis/time_study/README.md)。目前没有证据支持用固定50段或局部注意力替换词区间主方案；人工词边界真值仍为空。视觉复核发现一个鸟类片段的8帧人脸误报，已单独导出带源身份的排除掩码，尚未覆盖主特征。
+
+```bash
+.venv-q1/bin/python -m pip install -r q1/analysis/requirements.txt
+.venv-q1/bin/python -m q1.analysis.alignment_quality
+.venv-q1/bin/python -m q1.analysis.probe --threads 2
+```
+
+修正版结果在 `outputs/q1/analysis/probe_v2/`，其中 `report.md` 为可读汇总，`report.json` 保存协议、版本、输入校验和及统计检验，`predictions.csv` 保存逐样本预测，`probe_comparison.svg/.pdf/.png` 可用于论文绘图。原 `analysis/probe.json` 是旧协议结果，不能与新结果混写。
+
+这些是附件1上的辅助特征诊断，不属于问题2/3的训练或专项测试结果。VAD不提供人工词边界真值；探针结果不能证明某一维度最优。
 
 ## 模型来源
 

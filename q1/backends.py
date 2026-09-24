@@ -200,6 +200,8 @@ class VisionEncoder:
         features, qualities, records = [], [], []
         previous_box = None
         cap = cv2.VideoCapture(sample["video"])
+        if not cap.isOpened():
+            raise IOError(f"OpenCV无法打开视频：{sample['video']}")
         count = 0
         try:
             with tempfile.TemporaryDirectory(prefix="q1-frame-") as temp:
