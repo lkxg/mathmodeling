@@ -3,6 +3,7 @@ root_dir: ..
 video_root: E题/E题数据/附件1-数据集原始多模态样本/MOSEI数据集部分原始视频-100条
 labels: E题/E题数据/附件1-数据集原始多模态样本/MOSEI数据集部分原始视频-100条/label-100.xlsx
 output_dir: outputs/q1
+quality_review: q1/quality_review.json
 expected_samples: 100
 device: cuda:0
 seed: 2026
@@ -17,9 +18,6 @@ models:
     revision: 8949b909ec900327062f0ebf497f51aef5e6f0c8
     dtype: float32
     attention: eager
-  emotion:
-    id: emotion2vec/emotion2vec_base
-    revision: 0c9a3152734f9d7a7a05b4ee6bfb3c109d288664
   face:
     id: nutPace/openface_weights
     revision: 3844412b54706ed0a930b99589508ed3c101f39e

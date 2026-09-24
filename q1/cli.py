@@ -6,7 +6,6 @@ import importlib
 import json
 import logging
 import shutil
-import sys
 from pathlib import Path
 
 from .common import environment, load_config, snapshot
@@ -32,7 +31,7 @@ def select_samples(manifest, limit=None, ids=None):
 def doctor(cfg):
     status = {"packages": environment(), "commands": {p: shutil.which(p) for p in ("ffmpeg", "ffprobe")},
               "imports": {}}
-    for name in ("opensmile", "funasr", "openface.face_detection", "openface.multitask_model",
+    for name in ("opensmile", "openface.face_detection", "openface.multitask_model",
                  "transformers.models.qwen3_asr.processing_qwen3_asr"):
         try:
             importlib.import_module(name)
@@ -53,7 +52,6 @@ def doctor(cfg):
 def fetch(cfg):
     patterns = {"align": ["*.json", "*.jinja", "*.safetensors"],
                 "text": ["*.json", "model.safetensors"],
-                "emotion": ["*.yaml", "*.json", "*.pt"],
                 "face": ["Alignment_RetinaFace.pth", "MTL_backbone.pth"]}
     for name, spec in cfg["models"].items():
         print(f"Fetching {name}: {spec['id']} @ {spec['revision']}", flush=True)
@@ -73,7 +71,8 @@ def main(argv=None):
     parser.add_argument("--config", default=str(Path(__file__).with_name("config.yaml")))
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("doctor", help="检查运行依赖，不下载模型")
-    sub.add_parser("fetch-models", help="下载配置中固定版本的四组权重")
+    sub.add_parser("fetch-models", help="下载Qwen3、ModernBERT和OpenFace固定权重")
+    sub.add_parser("report", help="生成当前方案的Word报告与图表")
     sub.add_parser("manifest", help="核验全部视频/标签，输出样本清单")
     run = sub.add_parser("run", help="执行全部或指定阶段，自动复用有效缓存")
     run.add_argument("--stage", choices=("all", *STAGES), default="all")
@@ -112,6 +111,10 @@ def main(argv=None):
                 from .preview import render
                 sample = select_samples(manifest, ids=[args.id])[0]
                 print(render(cfg, sample, args.start, args.end))
+                return 0
+            if args.command == "report":
+                from .report import build_report
+                print(build_report(cfg, manifest["samples"]))
                 return 0
             samples = select_samples(manifest, args.limit, args.ids)
             if args.command == "run":

@@ -1,7 +1,6 @@
 """Pure numerical operations; no model imports or uniform-time guesses."""
 from __future__ import annotations
 
-import ast
 import unicodedata
 
 import numpy as np
@@ -47,41 +46,6 @@ def pool_tokens(hidden, offsets, spans, attention):
         valid.append(ok)
         rows.append(hidden[idx].mean(0) if ok else np.zeros(hidden.shape[1]))
     return np.asarray(rows, np.float32), np.asarray(valid, bool), mapping
-
-
-def conv_geometry(spec):
-    """Read the official convolution list expression without Python eval."""
-    def parse(node):
-        if isinstance(node, ast.Expression):
-            return parse(node.body)
-        if isinstance(node, ast.Constant) and isinstance(node.value, int):
-            return node.value
-        if isinstance(node, (ast.List, ast.Tuple)):
-            values = [parse(x) for x in node.elts]
-            return tuple(values) if isinstance(node, ast.Tuple) else values
-        if isinstance(node, ast.BinOp):
-            a, b = parse(node.left), parse(node.right)
-            if isinstance(node.op, ast.Add) and isinstance(a, list) and isinstance(b, list):
-                return a + b
-            if isinstance(node.op, ast.Mult) and isinstance(a, list) and isinstance(b, int) and 0 <= b < 100:
-                return a * b
-        raise ValueError("不支持的卷积配置表达式")
-    layers = parse(ast.parse(spec, mode="eval")) if isinstance(spec, str) else spec
-    receptive, stride = 1, 1
-    for _, kernel, step in layers:
-        if kernel < 1 or step < 1:
-            raise ValueError("卷积kernel和stride必须为正")
-        receptive += (kernel - 1) * stride
-        stride *= step
-    return receptive, stride
-
-
-def conv_intervals(count, samples, sr, offset, receptive, stride):
-    expected = max(0, (samples - receptive) // stride + 1)
-    if count != expected:
-        raise ValueError(f"emotion2vec时间轴长度不符：实际{count}，卷积结构推算{expected}")
-    starts = np.arange(count) * stride
-    return np.stack([starts, starts + receptive], 1) / sr + offset
 
 
 def union_length(intervals):

@@ -1,4 +1,0 @@
-# Install after the base Q1 environment. Existing decoded waveforms are used;
-# Silero's optional audio/codec/ONNX extras are not needed.
-silero-vad==6.2.3
-scikit-learn==1.9.1

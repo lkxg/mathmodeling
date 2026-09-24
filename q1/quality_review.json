@@ -1,0 +1,12 @@
+{
+  "scope": "Source-frame exclusions confirmed by visual inspection; not automatic speaker identification or human word-boundary annotation.",
+  "cases": [
+    {
+      "key": "-NFrJFQijFE__2",
+      "video_sha256": "a54a5c144a64f5abd26b19aafa6cea8142ee08e9385fa508fa70c934f6b616c1",
+      "review_type": "assistant_visual_inspection",
+      "excluded_original_frames": [45, 48, 60, 63, 66, 69, 96, 117],
+      "reason": "All eight detector-positive boxes were inspected and are bird feathers, not human faces."
+    }
+  ]
+}

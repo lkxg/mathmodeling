@@ -68,8 +68,10 @@ def load_config(path):
     root = (path.parent / cfg.pop("root_dir", "..")).resolve()
     for key in ("video_root", "labels", "output_dir"):
         cfg[key] = str((root / cfg[key]).resolve())
+    if cfg.get("quality_review"):
+        cfg["quality_review"] = str((root / cfg["quality_review"]).resolve())
     if cfg["media"]["sample_rate"] != 16000:
-        raise ValueError("Qwen3 / emotion2vec 使用16 kHz输入；sample_rate必须为16000")
+        raise ValueError("强制对齐与声学提取使用16 kHz输入；sample_rate必须为16000")
     if cfg["vision"]["sample_fps"] <= 0 or cfg["vision"]["max_side"] < 32:
         raise ValueError("视觉采样率必须为正，max_side必须至少为32")
     if cfg["aggregation"]["export_dtype"] not in ("float16", "float32"):
@@ -83,7 +85,7 @@ def load_config(path):
 def environment():
     versions = {}
     for pkg in ("torch", "torchvision", "torchaudio", "transformers", "numpy", "pandas",
-                "opensmile", "funasr", "openface-test", "timm", "huggingface_hub"):
+                "opensmile", "openface-test", "timm", "huggingface_hub"):
         try:
             versions[pkg] = importlib.metadata.version(pkg)
         except importlib.metadata.PackageNotFoundError:
@@ -92,7 +94,9 @@ def environment():
 
 
 def code_hash():
-    return digest({p.name: file_hash(p) for p in sorted(Path(__file__).parent.glob("*.py"))})
+    # Presentation and validation edits do not change extracted feature values.
+    names = ("backends.py", "common.py", "media.py", "pipeline.py", "temporal.py")
+    return digest({name: file_hash(Path(__file__).with_name(name)) for name in names})
 
 
 def seed_runtime(seed):
@@ -109,10 +113,3 @@ def snapshot(spec, patterns):
     from huggingface_hub import snapshot_download
     return Path(snapshot_download(repo_id=spec["id"], revision=spec["revision"],
                                   allow_patterns=patterns))
-
-
-def float_array(x, ndim=2):
-    x = np.asarray(x, dtype=np.float32)
-    if x.ndim != ndim:
-        raise ValueError(f"Expected {ndim}-D array; got {x.shape}")
-    return x

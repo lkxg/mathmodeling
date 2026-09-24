@@ -6,8 +6,8 @@ import numpy as np
 
 from q1.common import atomic_json, atomic_npz
 from q1.dataset import collate
-from q1.pipeline import Cache, aggregate, validate
-from q1.temporal import (conv_geometry, conv_intervals, interval_pool, make_timeline,
+from q1.pipeline import Cache, aggregate, reviewed_quality, validate
+from q1.temporal import (interval_pool, make_timeline,
                          pool_tokens, sampled_support, word_spans)
 
 
@@ -30,6 +30,7 @@ class TemporalTests(unittest.TestCase):
         x, std, mask, coverage, mapping = interval_pool([[0, 2], [3, 4]],
             [[0, 1], [1, 3]], [[0], [8]], [1, .5])
         self.assertAlmostEqual(float(x[0, 0]), 8 / 3, places=6)
+        self.assertAlmostEqual(float(std[0, 0]), np.sqrt(128 / 9), places=6)
         self.assertAlmostEqual(sum(mapping[0]["weights"]), 1)
         np.testing.assert_array_equal(mask, [True, False])
         np.testing.assert_array_equal(coverage, [1, 0])
@@ -45,17 +46,6 @@ class TemporalTests(unittest.TestCase):
     def test_coverage_does_not_double_count_overlapping_receptive_fields(self):
         _, _, _, coverage, _ = interval_pool([[0, 1]], [[0, .7], [.3, 1]], [[1], [2]], [1, 1])
         self.assertEqual(coverage[0], 1)
-
-    def test_convolution_anchor_uses_stride_and_offset_not_clip_stretching(self):
-        rf, step = conv_geometry("[(512, 10, 5)] + [(512, 3, 2)] * 4 + [(512, 2, 2)] * 2")
-        self.assertEqual((rf, step), (400, 320))
-        t = conv_intervals(49, 16000, 16000, .2, rf, step)
-        np.testing.assert_allclose(t[0], [.2, .225])
-        np.testing.assert_allclose(t[-1], [1.16, 1.185])
-        with self.assertRaises(ValueError):
-            conv_intervals(50, 16000, 16000, 0, rf, step)
-        with self.assertRaises(ValueError):
-            conv_geometry("__import__('os').system('false')")
 
     def test_gaps_are_retained_without_calling_them_silence(self):
         words = [{"text": "hi", "start": .2, "end": .6, "time_valid": True}]
@@ -102,10 +92,9 @@ class TemporalTests(unittest.TestCase):
                                                    "time_valid": not silent, "char_span": [0, 4]}]})
         atomic_npz(d / "text.npz", features=np.ones((1, 4)), valid=np.array([True]))
         atomic_json(d / "text.json", {"word_to_tokens": [[1, 2]]})
-        atomic_npz(d / "audio_features.npz", emotion=np.ones((2, 3)), emotion_intervals=[[0, .5], [.5, 1]],
-                   emotion_valid=[not silent] * 2, acoustic=np.ones((2, 2)),
+        atomic_npz(d / "audio.npz", acoustic=np.ones((2, 2)),
                    acoustic_intervals=[[0, .5], [.5, 1]], acoustic_valid=[not silent] * 2)
-        atomic_json(d / "audio_features.json", {"acoustic_names": ["a", "b"]})
+        atomic_json(d / "audio.json", {"acoustic_names": ["a", "b"]})
         atomic_npz(d / "vision.npz", features=np.zeros((2, 2)), intervals=[[0, .5], [.5, 1]], quality=[0, 0])
         atomic_json(d / "vision.json", {"frames": []})
         return d, cfg, sample
@@ -122,11 +111,11 @@ class TemporalTests(unittest.TestCase):
             self.assertFalse(data["modality_mask"][:, 2].any())
             self.assertTrue(data["valid_mask"].all())
             self.assertTrue((data["vision"] == 0).all())
-            # Word 0.2-0.7 overlaps both emotion windows: 0.3 s and 0.2 s.
-            offsets, indices = data["map_emotion_offsets"], data["map_emotion_indices"]
+            # Word 0.2-0.7 overlaps both acoustic windows: 0.3 s and 0.2 s.
+            offsets, indices = data["map_acoustic_offsets"], data["map_acoustic_indices"]
             self.assertEqual(offsets.tolist(), [0, 1, 3, 4])
             self.assertEqual(indices[offsets[1]:offsets[2]].tolist(), [0, 1])
-            np.testing.assert_allclose(data["map_emotion_weights"][offsets[1]:offsets[2]], [.6, .4], rtol=1e-6)
+            np.testing.assert_allclose(data["map_acoustic_weights"][offsets[1]:offsets[2]], [.6, .4], rtol=1e-6)
             self.assertEqual(data["map_vision_offsets"].tolist(), [0, 0, 0, 0])
             short = {k: (v[1:2] if v.ndim else np.asarray(1, np.int32)) for k, v in data.items()}
             batch = collate([data, short])
@@ -145,6 +134,72 @@ class TemporalTests(unittest.TestCase):
                 self.assertTrue((z["audio"] == 0).all())
                 # Text survives even though no timestamp is usable.
                 self.assertEqual(z["modality_mask"][:, 0].sum(), 1)
+
+    def test_audio_export_is_25_means_and_25_within_interval_stds(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d, cfg, sample = self._write_aggregate_inputs(tmp)
+            x = np.arange(25)[None, :] + np.array([[3.], [8.]])
+            atomic_npz(d / "audio.npz", acoustic=x, acoustic_intervals=[[0, .5], [.5, 1]],
+                       acoustic_valid=[True, True])
+            result = aggregate(sample, d, cfg)
+            self.assertEqual(result["audio_dim"], 50)
+            with np.load(Path(tmp) / "features/sample.npz") as z:
+                np.testing.assert_allclose(z["audio"][1, :25], np.arange(25) + 5)
+                np.testing.assert_allclose(z["audio"][1, 25:], np.sqrt(6), rtol=1e-6)
+                self.assertEqual(z["coverage"].shape, (3, 2))
+
+    def test_review_exclusion_removes_false_face_from_output_and_source_map(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d, cfg, sample = self._write_aggregate_inputs(tmp)
+            review = Path(tmp) / "review.json"
+            atomic_json(review, {"cases": [{"key": sample["key"], "video_sha256": "test",
+                                           "excluded_original_frames": [45, 48]}]})
+            cfg["quality_review"] = str(review)
+            atomic_npz(d / "vision.npz", features=np.ones((2, 2)), intervals=[[0, .5], [.5, 1]],
+                       quality=[1, 1], frame_indices=[45, 48])
+            result = aggregate(sample, d, cfg)
+            self.assertEqual(result["review_excluded_vision_frames"], 2)
+            with np.load(Path(tmp) / "features/sample.npz") as z:
+                self.assertFalse(z["modality_mask"][:, 2].any())
+                self.assertEqual(len(z["map_vision_indices"]), 0)
+                self.assertTrue(z["source_vision_excluded"].all())
+            with np.load(d / "vision.npz") as z:
+                np.testing.assert_array_equal(z["quality"], [1, 1])
+
+    def test_review_exclusion_rejects_different_source_video(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "review.json"
+            atomic_json(path, {"cases": [{"key": "s", "video_sha256": "old",
+                                         "excluded_original_frames": [0]}]})
+            with self.assertRaisesRegex(ValueError, "哈希不匹配"):
+                reviewed_quality({"key": "s", "video_sha256": "new"},
+                                 {"quality": np.array([1]), "frame_indices": np.array([0])},
+                                 {"quality_review": str(path)})
+
+    def test_source_map_rejects_negative_index(self):
+        from q1.validation import check_mapping
+        z = {"timestamps": np.array([[0., 1.]]), "source_acoustic_intervals": np.array([[0., 1.]]),
+             "map_acoustic_offsets": np.array([0, 1]), "map_acoustic_indices": np.array([-1]),
+             "map_acoustic_weights": np.array([1.])}
+        with self.assertRaisesRegex(ValueError, "索引或权重非法"):
+            check_mapping(z, "acoustic", np.array([[0., 1.]]), np.ones((1, 25)), np.ones(1), "audio", 1)
+
+    def test_real_opensmile_keeps_native_offset_and_marks_digital_silence(self):
+        import soundfile as sf
+        from q1.backends import AudioEncoder
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            encoder = AudioEncoder({})
+            for silent in (False, True):
+                wave = np.zeros(8000, np.float32) if silent else .1 * np.sin(2 * np.pi * 200 * np.arange(8000) / 16000)
+                sf.write(directory / "audio.wav", wave, 16000, subtype="FLOAT")
+                atomic_json(directory / "media.json", {"audio_offset": .2, "audio_rms": float(np.sqrt(np.mean(wave**2))),
+                            "audio_peak": float(np.abs(wave).max()), "silent_audio": silent})
+                encoder.process({}, directory, {})
+                with np.load(directory / "audio.npz") as z:
+                    self.assertEqual(z["acoustic"].shape[1], 25)
+                    self.assertAlmostEqual(z["acoustic_intervals"][0, 0], .2)
+                    self.assertEqual(z["acoustic_valid"].any(), not silent)
 
     def test_selected_validation_does_not_overwrite_full_manifest_report(self):
         with tempfile.TemporaryDirectory() as tmp:

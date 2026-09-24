@@ -14,7 +14,7 @@ def collate(samples):
     lengths = [int(x["length"]) for x in samples]
     batch = {"lengths": torch.tensor(lengths, dtype=torch.long)}
     for key in ("text", "audio", "vision", "timestamps", "valid_mask", "time_valid_mask",
-                "modality_mask", "component_mask", "coverage", "word_indices"):
+                "modality_mask", "coverage", "word_indices"):
         shape = (len(samples), max(lengths), *samples[0][key].shape[1:])
         fill = -1 if key == "word_indices" else 0
         array = np.full(shape, fill, dtype=samples[0][key].dtype)

@@ -1,4 +1,4 @@
-"""Lazy adapters for the four pinned model families and openSMILE.
+"""Lazy adapters for Qwen3 alignment, ModernBERT, openSMILE and OpenFace 3.0.
 
 Only the selected stage loads its models. No generated labels are used as truth.
 """
@@ -9,10 +9,9 @@ from pathlib import Path
 
 import numpy as np
 import soundfile as sf
-import yaml
 
 from .common import atomic_json, atomic_npz, read_json, snapshot
-from .temporal import conv_geometry, conv_intervals, pool_tokens, sampled_support, word_spans
+from .temporal import pool_tokens, sampled_support, word_spans
 
 
 def hf_model(spec, auto_class, device):
@@ -110,30 +109,14 @@ class TextEncoder:
 class AudioEncoder:
     def __init__(self, cfg):
         import opensmile
-        from funasr import AutoModel
-        self.spec = cfg["models"]["emotion"]
-        path = snapshot(self.spec, ["*.yaml", "*.json", "*.pt"])
-        conf = yaml.safe_load((path / "config.yaml").read_text())
-        spec = conf["model_conf"]["modalities"]["audio"]["feature_encoder_spec"]
-        self.receptive, self.stride = conv_geometry(spec)
-        self.model = AutoModel(model=str(path), device=cfg["device"], hub="hf",
-                               disable_update=True, disable_pbar=True)
-        self.model.model.eval()
         self.smile = opensmile.Smile(feature_set=opensmile.FeatureSet.eGeMAPSv02,
                                      feature_level=opensmile.FeatureLevel.LowLevelDescriptors)
 
     def process(self, sample, directory, cfg):
-        import torch
         media = read_json(directory / "media.json")
         wave, sr = sf.read(directory / "audio.wav", dtype="float32")
-        with torch.inference_mode():
-            result = self.model.generate(input=wave, fs=sr, granularity="frame",
-                                         extract_embedding=True, disable_pbar=True)
-        emotional = np.asarray(result[0]["feats"], np.float32)
-        if emotional.ndim != 2 or emotional.shape[1] != 768:
-            raise ValueError(f"期待emotion2vec_base帧级[N,768]输出，实际{emotional.shape}")
-        intervals = conv_intervals(len(emotional), len(wave), sr, media["audio_offset"],
-                                   self.receptive, self.stride)
+        if sr != 16000 or wave.ndim != 1:
+            raise ValueError("openSMILE输入必须为16 kHz单声道")
         lld = self.smile.process_signal(wave, sr)
         acoustic = lld.to_numpy(np.float32)
         if acoustic.shape[1] != 25:
@@ -142,16 +125,14 @@ class AudioEncoder:
                                          for k in ("start", "end")]) + media["audio_offset"]
         # Digital silence is a missing observation, not a legitimate zero-valued one.
         audible = not media["silent_audio"]
-        atomic_npz(directory / "audio_features.npz", emotion=emotional,
-            emotion_intervals=intervals, emotion_valid=np.isfinite(emotional).all(1) & audible,
-            acoustic=acoustic, acoustic_intervals=acoustic_times,
+        atomic_npz(directory / "audio.npz", acoustic=acoustic, acoustic_intervals=acoustic_times,
             acoustic_valid=np.isfinite(acoustic).all(1) & audible)
-        atomic_json(directory / "audio_features.json", {"model": self.spec,
-            "acoustic_names": list(lld.columns), "receptive_samples": self.receptive,
-            "stride_samples": self.stride, "emotion_dimension": emotional.shape[1],
-            "time_note": "卷积输入感受野提供位置锚点；Transformer表示仍包含整段上下文。未把帧数均分到整段时长。",
+        atomic_json(directory / "audio.json", {"tool": "openSMILE", "feature_set": "eGeMAPSv02",
+            "feature_level": "LowLevelDescriptors", "dimension": 25,
+            "acoustic_names": list(lld.columns),
+            "time_note": "openSMILE返回的原生start/end索引加音频在片段内的实际偏移",
             "rms": media["audio_rms"], "peak": media["audio_peak"], "silent_audio": media["silent_audio"]})
-        return {"emotion_frames": len(emotional), "acoustic_frames": len(acoustic)}
+        return {"acoustic_frames": len(acoustic)}
 
 
 def box_iou(box, boxes):
