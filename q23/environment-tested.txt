@@ -1,0 +1,15 @@
+Python 3.12.3
+PyTorch 2.13.0+cu126
+Transformers 5.17.0
+scikit-learn 1.9.1
+Matplotlib 3.11.2
+NumPy 2.5.2
+SciPy 1.18.1
+PyYAML 6.0.1
+OpenCV 5.0.0
+GPU: NVIDIA Tesla V100-SXM3-32GB
+Pretrained text embedding: google-bert/bert-base-uncased,
+  revision 86b5e0934494bd15c9632b12f734a8a67f723594
+Forced alignment: Qwen/Qwen3-ForcedAligner-0.6B-hf,
+  revision c07281df297b9905d24a508279258cccf987a064
+External programs: ffmpeg and ffprobe (versions recorded in align_cache media.json)
